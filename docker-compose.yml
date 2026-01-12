@@ -1,0 +1,17 @@
+services:
+  waha:
+    image: devlikeapro/waha
+    container_name: waha
+    ports:
+      - "3000:3000"
+    environment:
+      - WAHA_SECURITY_MODE=DISABLED
+      - WAHA_DASHBOARD_NO_PASSWORD=True
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB  # Using the faster, more stable engine
+      - WAHA_RESTART_ALL_SESSIONS=True
+    volumes:
+      - waha_sessions:/app/.sessions
+    restart: always
+
+volumes:
+  waha_sessions:

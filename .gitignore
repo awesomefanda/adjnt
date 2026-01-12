@@ -1,0 +1,22 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+venv/
+env/
+.venv/
+.env
+
+# Database
+adjnt_vault.db
+adjnt_vault.db-journal
+
+# Logs
+*.log
+adjnt_debug.log
+
+# IDEs
+.vscode/
+.idea/
