@@ -1,3 +1,6 @@
+# WhatsApp Session Data (CRITICAL: Contains your login keys)
+waha_sessions/*
+.sessions/
 # Python bytecode
 __pycache__/
 *.py[cod]

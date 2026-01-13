@@ -24,7 +24,9 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    jobstores = {'default': SQLAlchemyJobStore(url='sqlite:///adjnt_vault.db')}
+    # Use environment variable for DB path to ensure persistence
+    db_path = os.getenv("DATABASE_URL", "sqlite:///adjnt_vault.db")
+    jobstores = {'default': SQLAlchemyJobStore(url=db_path)}
     scheduler = BackgroundScheduler(jobstores=jobstores)
     scheduler.start()
     logger.info("🚀 ADJNT SYSTEM ONLINE - Waiting for messages...")
@@ -36,14 +38,17 @@ brain = AdjntBrain()
 
 # --- WAHA Send Function ---
 def send_wa(to, text):
-    url = f"{os.getenv('WAHA_URL', 'http://127.0.0.1:3001')}/api/sendText"
+    # 'waha' is the service name defined in docker-compose
+    waha_host = os.getenv('WAHA_URL', 'http://waha:3000')
+    url = f"{waha_host}/api/sendText"
+    
     payload = {
         "chatId": to,
         "text": text,
         "session": os.getenv("SESSION_NAME", "default")
     }
     try:
-        logger.info(f"📤 REPLIER: Sending to {to}")
+        logger.info(f"📤 REPLIER: Sending to {to} via {url}")
         response = requests.post(url, json=payload)
         logger.info(f"📤 REPLIER status: {response.status_code}")
     except Exception as e:
@@ -71,25 +76,18 @@ async def process_adjnt(text, recipient_id):
     except Exception as e:
         logger.error(f"❌ Brain Error: {e}")
 
-# --- WEBHOOK ENDPOINT (Diagnostic) ---
+# --- WEBHOOK ENDPOINT ---
 @app.post("/webhook")
 async def webhook(request: Request, bg: BackgroundTasks):
-    # STEP 1: Log that something touched this endpoint
     logger.info(f"🚩 WEBHOOK: Connection received from {request.client.host}")
-    
     try:
-        # STEP 2: Capture raw data
         raw_body = await request.body()
         data = json.loads(raw_body)
-        
-        # Log the full JSON so we can see what WAHA is sending
-        logger.info(f"📦 PAYLOAD: {json.dumps(data, indent=2)}")
         
         event_type = data.get("event")
         payload = data.get('payload', {})
 
         if event_type not in ["message", "message.any"]:
-            logger.info(f"⏭️ Skipping event: {event_type}")
             return {"status": "ignored"}
 
         if payload.get('fromMe'):

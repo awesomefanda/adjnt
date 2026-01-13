@@ -1,17 +1,34 @@
+version: '3.8'
+
 services:
+  # WhatsApp Engine
   waha:
     image: devlikeapro/waha
     container_name: waha
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - WAHA_SECURITY_MODE=DISABLED
-      - WAHA_DASHBOARD_NO_PASSWORD=True
-      - WHATSAPP_DEFAULT_ENGINE=NOWEB  # Using the faster, more stable engine
-      - WAHA_RESTART_ALL_SESSIONS=True
+      - WAHA_NO_API_KEY=True
+      - WHATSAPP_DEFAULT_ENGINE=NOWEB
+      # Tells WAHA to send messages to the 'adjnt' container
+      - WHATSAPP_HOOK_URL=http://adjnt:8000/webhook
+      - WHATSAPP_HOOK_EVENTS=message,message.any
     volumes:
-      - waha_sessions:/app/.sessions
-    restart: always
+      - ./waha_sessions:/app/.sessions
 
-volumes:
-  waha_sessions:
+  # AI Assistant
+  adjnt:
+    build: .
+    container_name: adjnt-app
+    ports:
+      - "8000:8000"
+    environment:
+      - WAHA_URL=http://waha:3000
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434/api/generate
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/app
+    depends_on:
+      - waha
