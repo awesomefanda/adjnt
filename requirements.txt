@@ -1,21 +1,8 @@
-# --- Web Framework ---
-fastapi[standard]==0.115.0  # Modern, fast web framework
-uvicorn==0.31.0             # High-performance ASGI server
-
-# --- AI & Brain ---
-langchain==0.3.0            # Orchestration for AI models
-langchain-ollama==0.2.0     # Local Llama 3 connection via Ollama
-langchain-core==0.3.0       # Essential LangChain schemas
-
-# --- Database & Models ---
-sqlmodel==0.0.22            # Pydantic + SQLModel (Combined)
-sqlalchemy==2.0.35          # Underlying database engine
-
-# --- Task Scheduling ---
-apscheduler==3.10.4         # Manages timed reminders (SQLAlchemy support is built-in)
-
-# --- Utilities ---
-requests==2.32.3            # Calling the Evolution API
-python-dotenv==1.0.1        # Managing .env configuration
-pydantic==2.9.2             # Data validation (used by SQLModel)
-pydantic-settings==2.5.2    # Strong typing for your .env config
+fastapi
+uvicorn
+sqlalchemy
+sqlmodel
+apscheduler
+requests
+python-dotenv
+groq

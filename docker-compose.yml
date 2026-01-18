@@ -1,17 +1,16 @@
-version: '3.8'
-
 services:
   # WhatsApp Engine
   waha:
     image: devlikeapro/waha
     container_name: waha
+    restart: unless-stopped
     ports:
       - "3001:3000"
     environment:
       - WAHA_SECURITY_MODE=DISABLED
       - WAHA_NO_API_KEY=True
       - WHATSAPP_DEFAULT_ENGINE=NOWEB
-      # Tells WAHA to send messages to the 'adjnt' container
+      # 🚀 Use the SERVICE NAME 'adjnt'
       - WHATSAPP_HOOK_URL=http://adjnt:8000/webhook
       - WHATSAPP_HOOK_EVENTS=message,message.any
     volumes:
@@ -20,14 +19,16 @@ services:
   # AI Assistant
   adjnt:
     build: .
-    container_name: adjnt-app
+    # 🚀 Changed to match the service name for clarity
+    container_name: adjnt
     ports:
       - "8000:8000"
     environment:
       - WAHA_URL=http://waha:3000
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434/api/generate
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - PYTHONUNBUFFERED=1
+      # 🚀 These will be pulled by your new Groq brain.py
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - MODEL_NAME=${MODEL_NAME}
     volumes:
       - .:/app
     depends_on:
