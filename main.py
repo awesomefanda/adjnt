@@ -2,6 +2,7 @@ import os
 import requests
 import logging
 import json
+import re
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from collections import Counter
@@ -15,6 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from dotenv import load_dotenv
 
+# --- Setup ---
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("Adjnt")
@@ -27,12 +29,13 @@ scheduler = BackgroundScheduler(jobstores=jobstores)
 def get_guide():
     return (
         "🤖 *Adjnt Quick Start Guide*\n\n"
-        "✅ *Add:* 'Add milk' or 'Stash my keys'\n"
+        "I'm your Alexa-style assistant. Try these:\n"
+        "✅ *Add:* 'Add milk, eggs and bread'\n"
         "📋 *View:* 'Show my vault'\n"
-        "⏰ *Alerts:* 'Remind me to pick up cake in 10 mins'\n"
-        "🗑️ *Delete:* 'Delete milk' (removes 1) or 'Clear the list' (wipes all)\n"
-        "💬 *Ask:* 'How do I cook salmon?'\n\n"
-        "Type *ONBOARD* for this menu!"
+        "⏰ *Remind:* 'Remind me to check the oven in 10 mins'\n"
+        "🗑️ *Delete:* 'Delete milk' or 'Clear the entire list'\n"
+        "💬 *Ask:* 'How do I fix a leaky faucet?'\n\n"
+        "Type *ONBOARD* anytime to see this!"
     )
 
 @asynccontextmanager
@@ -62,37 +65,39 @@ async def process_adjnt(text, recipient_id):
         data = analysis.get('data', {})
 
         with Session(engine) as session:
-            # 1. TASK: Add item (Allows duplicates)
+            # 1. TASK: Handles single or multiple items via AI-generated list
             if intent == "TASK":
-                item = data.get('item', text).strip()
-                session.add(Task(description=item, group_id=recipient_id))
+                items_to_add = data.get('items', [])
+                # This prevents the code from processing the same item twice in one message
+                for item_name in set(items_to_add): 
+                    session.add(Task(description=item_name.strip(), group_id=recipient_id))
                 session.commit()
-                send_wa(recipient_id, f"✅ Vaulted: {item}")
+                send_wa(recipient_id, f"✅ Added {len(set(items_to_add))} items.")
 
-            # 2. DELETE: Smart Removal (One, All, or Everything)
-            elif intent == "DELETE":
-                item_name = data.get('item', "").lower().strip()
+            # 2. DELETE: Smart Removal
+            elif intent == "DELETE" or intent == "DELETE_TASK":
+                items_to_del = data.get('items', [])
                 mode = data.get('mode', 'SINGLE')
                 
-                # Logic for "Clear the list" or "the list"
-                if "the list" in item_name or "everything" in item_name or item_name == "EVERYTHING":
+                # Check if we are clearing the whole vault
+                if any(x in [i.lower() for i in items_to_del] for x in ["everything", "the list", "all"]):
                     session.exec(delete(Task).where(Task.group_id == recipient_id))
                     msg = "🧹 Vault cleared!"
-                elif mode == "ALL":
-                    session.exec(delete(Task).where(Task.group_id == recipient_id, Task.description.ilike(item_name)))
-                    msg = f"🧹 Cleared all {item_name}."
                 else:
-                    # Remove only one instance (Reduce count)
-                    task = session.exec(select(Task).where(Task.group_id == recipient_id, Task.description.ilike(item_name))).first()
-                    if task:
-                        session.delete(task)
-                        msg = f"🗑️ Removed 1x {item_name}."
-                    else:
-                        msg = f"❓ Couldn't find '{item_name}'."
+                    for item_name in items_to_del:
+                        # Look for one instance to remove
+                        statement = select(Task).where(Task.group_id == recipient_id, Task.description.ilike(item_name))
+                        task = session.exec(statement).first()
+                        if task:
+                            session.delete(task)
+                            msg = f"🗑️ Removed: {item_name}"
+                        else:
+                            msg = f"❓ Couldn't find '{item_name}'."
+                
                 session.commit()
                 send_wa(recipient_id, msg)
 
-            # 3. LIST: Show items with Count
+            # 3. LIST: Show items with counts
             elif intent == "LIST":
                 tasks = session.exec(select(Task).where(Task.group_id == recipient_id)).all()
                 if not tasks:
@@ -115,14 +120,15 @@ async def process_adjnt(text, recipient_id):
             elif intent == "ONBOARD":
                 send_wa(recipient_id, get_guide())
 
-            # 6. UNKNOWN (Fallback with examples)
+            # 6. UNKNOWN / Fallback
             elif intent == "UNKNOWN":
-                send_wa(recipient_id, "🤔 I'm not sure how to do that. Here is what I can understand:")
+                send_wa(recipient_id, "🤔 I'm not sure about that action. Here's a quick guide:")
                 send_wa(recipient_id, get_guide())
 
             # 7. CHAT
             else:
-                send_wa(recipient_id, data.get('answer', "I'm here to help!"))
+                answer = data.get('answer', "I'm here to help with your vault and reminders.")
+                send_wa(recipient_id, answer)
 
     except Exception as e:
         logger.error(f"❌ Process Error: {e}")
@@ -138,7 +144,10 @@ async def webhook(request: Request, bg: BackgroundTasks):
     
     if not payload.get('fromMe') and payload.get('body'):
         processed_ids.add(msg_id)
-        if len(processed_ids) > 200: processed_ids.pop()
+        if len(processed_ids) > 200: 
+            # Simple way to keep the set small
+            list(processed_ids).pop(0) 
+        
         bg.add_task(process_adjnt, payload.get('body'), payload.get('from'))
         
     return {"status": "ok"}

@@ -23,17 +23,26 @@ class AdjntBrain:
             return {"intent": "LIST", "data": {}}
 
         system_prompt = (
-            f"SYSTEM: You are a backend logic parser. Current time is {current_now}. "
-            "You MUST output a valid JSON object. No preambles.\n\n"
-            "ALLOWED INTENTS:\n"
-            "- TASK: {'intent': 'TASK', 'data': {'item': 'str'}}\n"
-            "- DELETE: {'intent': 'DELETE', 'data': {'item': 'str', 'mode': 'SINGLE'|'ALL'}}\n"
-            "   * If user says 'clear list' or 'wipe everything', item is 'EVERYTHING'.\n"
+            f"SYSTEM: You are a backend logic parser. Current time: {current_now}. "
+            "You MUST output ONLY a valid JSON object. No preambles or explanations.\n\n"
+            "INTENT SCHEMA & RULES:\n"
+            "- TASK: {'intent': 'TASK', 'data': {'items': ['item1', 'item2']}}\n"
+            "  * RULE: Extract the specific items to be added. If a user says 'add one more milk', the items list should be ['milk'].\n"
+            "  * RULE: Never repeat the same item in the 'items' array unless they have different adjectives (e.g., ['green apple', 'red apple']).\n"
+            "  * RULE: Map verbs like 'stash', 'pick up', 'get', 'need' to TASK.\n"
+            "- DELETE: {'intent': 'DELETE', 'data': {'items': ['item1'], 'mode': 'SINGLE'|'ALL'}}\n"
+            "  * RULE: 'SINGLE' removes one instance. 'ALL' removes every instance of that name.\n"
+            "  * RULE: If the user wants to wipe the whole list, set items to ['EVERYTHING'].\n"
             "- LIST: {'intent': 'LIST', 'data': {}}\n"
+            "  * RULE: Use for 'what's in my vault', 'show list', or 'check my items'.\n"
             "- REMIND: {'intent': 'REMIND', 'data': {'item': 'str', 'minutes': int}}\n"
+            "  * RULE: Calculate minutes relative to the current time if the user provides a specific time.\n"
             "- CHAT: {'intent': 'CHAT', 'data': {'answer': 'str'}}\n"
-            "- ONBOARD: User asks for help.\n"
-            "- UNKNOWN: If the request is nonsensical."
+            "  * RULE: Use for general questions, advice, or greetings.\n"
+            "- ONBOARD: {'intent': 'ONBOARD', 'data': {}}\n"
+            "  * RULE: Use when user asks for 'help', 'instructions', or 'how to use'.\n"
+            "- UNKNOWN: {'intent': 'UNKNOWN', 'data': {}}\n"
+            "  * RULE: Use if the input is nonsensical or no other intent fits."
         )
 
         try:
