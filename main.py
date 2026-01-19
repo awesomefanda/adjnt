@@ -53,13 +53,25 @@ async def process_adjnt(text, recipient_id):
 
             if intent == "TASK":
                 items = data.get('items', [])
-                logger.info(f"💾 LLM DECIDED TO ADD: {items}")
                 added_log = []
                 for item in items:
-                    name, count, store = item.get('name', '').lower(), int(item.get('count', 1)), item.get('store', 'General')
+                    name = item.get('name', '').lower().strip()
+                    count = int(item.get('count', 1))
+                    
+                    # 🚀 AUTO-LOCATION LOGIC:
+                    # If the Brain says 'General', check if this item exists elsewhere first
+                    requested_store = item.get('store', 'General')
+                    if requested_store == "General":
+                        existing_item = session.exec(
+                            select(Task).where(Task.group_id == recipient_id, Task.description == name)
+                        ).first()
+                        if existing_item:
+                            requested_store = existing_item.store # Auto-match to Safeway!
+
                     for _ in range(count):
-                        session.add(Task(description=name, group_id=recipient_id, store=store))
-                    added_log.append(f"{name} (x{count})")
+                        session.add(Task(description=name, group_id=recipient_id, store=requested_store))
+                    added_log.append(f"{name} (x{count}) in {requested_store}")
+                
                 session.commit()
                 response_msg = f"✅ *Vaulted:* {', '.join(added_log)}."
             elif intent == "LIST":
@@ -93,29 +105,27 @@ async def process_adjnt(text, recipient_id):
                         items_list = [f"- {name} (x{c})" if c > 1 else f"- {name}" for name, c in counts.items()]
                         response_msg += "\n" + "\n".join(items_list)
 
-            # elif intent == "LIST":
-            #     tasks = session.exec(select(Task).where(Task.group_id == recipient_id)).all()
-            #     if not tasks:
-            #         response_msg = "Vault is empty."
-            #     else:
-            #         grouped = {}
-            #         for t in tasks:
-            #             s = t.store.capitalize()
-            #             if s not in grouped: grouped[s] = Counter()
-            #             grouped[s][t.description] += 1
-            #         response_msg = "📋 *Vault:*"
-            #         for s, items in grouped.items():
-            #             response_msg += f"\n\n📍 *{s}*\n" + "\n".join([f"- {k} (x{v})" if v>1 else f"- {k}" for k,v in items.items()])
-
             elif intent == "MOVE":
-                item, f_s, t_s = data.get('item', '').lower(), data.get('from_store'), data.get('to_store')
-                task = session.exec(select(Task).where(Task.group_id==recipient_id, Task.description==item, Task.store.ilike(f_s))).first()
-                if task:
-                    task.store = t_s
-                    session.add(task)
+                item_name = data.get('item', '').lower().strip()
+                from_store = data.get('from_store', 'General')
+                to_store = data.get('to_store', 'General')
+
+                # 1. Find the item in the 'from' store
+                statement = select(Task).where(
+                    Task.group_id == recipient_id, 
+                    Task.description == item_name,
+                    Task.store.ilike(from_store)
+                )
+                task_to_move = session.exec(statement).first()
+
+                if task_to_move:
+                    # 2. Update the store and commit
+                    task_to_move.store = to_store
+                    session.add(task_to_move)
                     session.commit()
-                    response_msg = f"🚚 Moved *{item}* to {t_s}."
-                else: response_msg = f"❓ No {item} in {f_s}."
+                    response_msg = f"🚚 Moved *{item_name}* from {from_store} to {to_store}."
+                else:
+                    response_msg = f"❓ Couldn't find {item_name} in {from_store}."
 
             elif intent == "DELETE":
                 items = data.get('items', [])

@@ -33,12 +33,14 @@ class AdjntBrain:
             "   * 'add 2 more' -> count: 2. 'I need 5 apples' -> count: 5.\n"
             "2. DELETE: Use mode 'SINGLE' for specific counts or 'ALL' to wipe an item.\n"
             "3. REMIND: Extract the task description and relative minutes from now.\n"
-            "4. LIST: Default store: 'All'. Use specific name ONLY if mentioned.\n\n"
+            "4. LIST: Default store: 'All'. Use specific name ONLY if mentioned.\n"
+            "5. MOVE: Use when moving an item from one store to another. Extract 'item', 'from_store', and 'to_store'.\n\n"
             "--- SCHEMA EXAMPLES ---\n"
             "- {'intent': 'TASK', 'data': {'items': [{'name': 'apple', 'count': 2, 'store': 'General'}]}}\n"
             "- {'intent': 'DELETE', 'data': {'items': [{'name': 'apple', 'count': 1}], 'mode': 'SINGLE'}}\n"
             "- {'intent': 'REMIND', 'data': {'item': 'check oven', 'minutes': 10}}\n"
             "- {'intent': 'LIST', 'data': {'store': 'All'}}\n"
+            "- {'intent': 'MOVE', 'data': {'item': 'apple', 'from_store': 'General', 'to_store': 'Safeway'}}\n"
             "- {'intent': 'CHAT', 'data': {'answer': 'Hi there!'}}"
         )
 

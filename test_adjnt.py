@@ -73,3 +73,39 @@ async def test_complete_feature_suite():
         assert safeway_apples == 2, "Store assignment failed. Safeway should have 2 apples."
         assert reminder_ok, "Reminder scheduling failed."
         print("✅ ALL FEATURES PASSED: Store, Math, Duplicates, Deletion, and Reminders.")
+
+@pytest.mark.asyncio
+async def test_edge_cases():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        uid = "edge_user@c.us"
+
+        # 1. Setup: Add Juice to Safeway
+        await ac.post("/webhook", json={"payload": {"id": "e1", "from": uid, "body": "add juice to Safeway", "fromMe": False}})
+        await asyncio.sleep(2)
+
+        # 2. Test Auto-Location: Just say "add juice"
+        await ac.post("/webhook", json={"payload": {"id": "e2", "from": uid, "body": "add juice", "fromMe": False}})
+        await asyncio.sleep(2)
+
+        # 3. Test Move: Move that juice to Kitchen
+        await ac.post("/webhook", json={"payload": {"id": "e3", "from": uid, "body": "move juice from Safeway to Kitchen", "fromMe": False}})
+
+        # --- POLLING VERIFICATION ---
+        total_juice = 0
+        kitchen_juice = 0
+        
+        print("\n🔍 Verifying Edge Cases...")
+        for i in range(10):
+            await asyncio.sleep(1)
+            with Session(engine) as s:
+                total_juice = s.exec(select(func.count(Task.id)).where(Task.description == "juice")).one()
+                kitchen_juice = s.exec(select(func.count(Task.id)).where(Task.description == "juice", Task.store == "Kitchen")).one()
+            
+            print(f"Attempt {i+1}: Total Juice: {total_juice}, Kitchen: {kitchen_juice}")
+            if total_juice == 2 and kitchen_juice >= 1:
+                break
+
+        assert total_juice == 2, f"Expected 2 juices total, found {total_juice}. (Check if Move triggered a Task/Add instead)"
+        assert kitchen_juice >= 1, "Move failed: No juice found in Kitchen store."
+        print("✅ Edge Cases Passed: Auto-located and Moved successfully.")
