@@ -6,3 +6,6 @@ apscheduler
 requests
 python-dotenv
 groq
+pytest
+pytest-asyncio
+httpx

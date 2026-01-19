@@ -13,36 +13,33 @@ class AdjntBrain:
         self.model = os.getenv("MODEL_NAME", "llama3-8b-8192")
         self.client = Groq(api_key=self.api_key)
 
-    # 🚀 FIX: Added 'current_now' as the second positional argument
     async def decide(self, text: str, current_now: str):
-        # 🚀 Instant Keyword Short-Circuits
         clean_text = text.lower().strip()
-        if clean_text in ["onboard", "help", "guide", "how to use"]:
+        
+        # Fast-track for simple commands
+        if clean_text in ["onboard", "help", "guide"]:
             return {"intent": "ONBOARD", "data": {}}
         if clean_text in ["list", "show vault", "show list"]:
-            return {"intent": "LIST", "data": {}}
+            return {"intent": "LIST", "data": {"store": "All"}}
 
         system_prompt = (
-            f"SYSTEM: You are a backend logic parser. Current time: {current_now}. "
-            "You MUST output ONLY a valid JSON object. No preambles or explanations.\n\n"
-            "INTENT SCHEMA & RULES:\n"
-            "- TASK: {'intent': 'TASK', 'data': {'items': ['item1', 'item2']}}\n"
-            "  * RULE: Extract the specific items to be added. If a user says 'add one more milk', the items list should be ['milk'].\n"
-            "  * RULE: Never repeat the same item in the 'items' array unless they have different adjectives (e.g., ['green apple', 'red apple']).\n"
-            "  * RULE: Map verbs like 'stash', 'pick up', 'get', 'need' to TASK.\n"
-            "- DELETE: {'intent': 'DELETE', 'data': {'items': ['item1'], 'mode': 'SINGLE'|'ALL'}}\n"
-            "  * RULE: 'SINGLE' removes one instance. 'ALL' removes every instance of that name.\n"
-            "  * RULE: If the user wants to wipe the whole list, set items to ['EVERYTHING'].\n"
-            "- LIST: {'intent': 'LIST', 'data': {}}\n"
-            "  * RULE: Use for 'what's in my vault', 'show list', or 'check my items'.\n"
-            "- REMIND: {'intent': 'REMIND', 'data': {'item': 'str', 'minutes': int}}\n"
-            "  * RULE: Calculate minutes relative to the current time if the user provides a specific time.\n"
-            "- CHAT: {'intent': 'CHAT', 'data': {'answer': 'str'}}\n"
-            "  * RULE: Use for general questions, advice, or greetings.\n"
-            "- ONBOARD: {'intent': 'ONBOARD', 'data': {}}\n"
-            "  * RULE: Use when user asks for 'help', 'instructions', or 'how to use'.\n"
-            "- UNKNOWN: {'intent': 'UNKNOWN', 'data': {}}\n"
-            "  * RULE: Use if the input is nonsensical or no other intent fits."
+            f"SYSTEM: You are a logic parser. Current time: {current_now}. "
+            "Output ONLY valid JSON. The word 'json' is required.\n\n"
+            "--- GENERAL RULES ---\n"
+            "1. ALWAYS return top-level keys 'intent' and 'data'.\n"
+            "2. Always singularize item names (apples -> apple, eggs -> egg).\n\n"
+            "--- INTENT-SPECIFIC RULES ---\n"
+            "1. TASK: Extract ONLY NEW items. NEVER calculate totals. Default store: 'General'.\n"
+            "   * 'add 2 more' -> count: 2. 'I need 5 apples' -> count: 5.\n"
+            "2. DELETE: Use mode 'SINGLE' for specific counts or 'ALL' to wipe an item.\n"
+            "3. REMIND: Extract the task description and relative minutes from now.\n"
+            "4. LIST: Default store: 'All'. Use specific name ONLY if mentioned.\n\n"
+            "--- SCHEMA EXAMPLES ---\n"
+            "- {'intent': 'TASK', 'data': {'items': [{'name': 'apple', 'count': 2, 'store': 'General'}]}}\n"
+            "- {'intent': 'DELETE', 'data': {'items': [{'name': 'apple', 'count': 1}], 'mode': 'SINGLE'}}\n"
+            "- {'intent': 'REMIND', 'data': {'item': 'check oven', 'minutes': 10}}\n"
+            "- {'intent': 'LIST', 'data': {'store': 'All'}}\n"
+            "- {'intent': 'CHAT', 'data': {'answer': 'Hi there!'}}"
         )
 
         try:
@@ -55,11 +52,9 @@ class AdjntBrain:
                 response_format={"type": "json_object"},
                 temperature=0.1
             )
-            
             raw_content = response.choices[0].message.content
             logger.info(f"🧠 BRAIN RAW OUTPUT: {raw_content}")
             return json.loads(raw_content)
-
         except Exception as e:
             logger.error(f"💥 BRAIN ERROR: {str(e)}")
             return {"intent": "UNKNOWN", "data": {}}
