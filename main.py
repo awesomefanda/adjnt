@@ -22,11 +22,11 @@ brain = AdjntBrain()
 
 def get_guide():
     return ("🤖 *Adjnt Guide*\n\n"
-            "✅ *Add:* 'Add 3 apples to Pantry'\n"
-            "📋 *List:* 'Show my vault'\n"
-            "🚚 *Move:* 'Move apple from General to Safeway'\n"
-            "⏰ *Remind:* 'Remind me in 10 mins to check oven'\n"
-            "🗑️ *Delete:* 'Delete 1 apple' or 'Clear all'")
+            "✅ *Add:* 'Add 3 apples'\n"
+            "📋 *List:* 'Show vault' or 'List reminders'\n"
+            "🚚 *Move:* 'Move apple to Safeway'\n"
+            "⏰ *Remind:* 'Neha Lunch Jan 24th 10:30 AM'\n"
+            "🗑️ *Delete:* 'Remove 1 apple' or 'Clear list'")
 
 def send_wa(to, text):
     url = f"{os.getenv('WAHA_URL', 'http://waha:3000')}/api/sendText"
@@ -37,151 +37,150 @@ def send_wa(to, text):
 
 async def process_adjnt(text, recipient_id):
     try:
+        # 🛡️ Normalize ID
+        recipient_id = str(recipient_id).strip()
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         analysis = await brain.decide(text, now_str)
         
-        # Robust intent/data parsing
         intent = analysis.get('intent', 'UNKNOWN')
-        data = analysis.get('data', analysis if 'items' in analysis else {})
+        data = analysis.get('data', {})
         response_msg = ""
 
         with Session(engine) as session:
-            # Commit Group first for Foreign Key safety
             if not session.get(Group, recipient_id):
                 session.add(Group(id=recipient_id, admin_id=recipient_id))
                 session.commit()
 
+            # --- 1. TASK (ADD) ---
             if intent == "TASK":
                 items = data.get('items', [])
+                if not items and data.get('item'):
+                    items = [{'name': data.get('item'), 'count': data.get('count', 1), 'store': data.get('store', 'General')}]
+                
                 added_log = []
                 for item in items:
                     name = item.get('name', '').lower().strip()
-                    count = int(item.get('count', 1))
-                    
-                    # 🚀 AUTO-LOCATION LOGIC:
-                    # If the Brain says 'General', check if this item exists elsewhere first
-                    requested_store = item.get('store', 'General')
-                    if requested_store == "General":
-                        existing_item = session.exec(
-                            select(Task).where(Task.group_id == recipient_id, Task.description == name)
-                        ).first()
-                        if existing_item:
-                            requested_store = existing_item.store # Auto-match to Safeway!
+                    count = int(item.get('count', item.get('quantity', 1)))
+                    store = item.get('store', 'General')
+
+                    # Auto-Location
+                    if store == "General":
+                        ex = session.exec(select(Task).where(Task.group_id == recipient_id, Task.description == name)).first()
+                        if ex: store = ex.store
 
                     for _ in range(count):
-                        session.add(Task(description=name, group_id=recipient_id, store=requested_store))
-                    added_log.append(f"{name} (x{count}) in {requested_store}")
+                        session.add(Task(description=name, group_id=recipient_id, store=store))
+                    added_log.append(f"{name} (x{count})")
                 
                 session.commit()
                 response_msg = f"✅ *Vaulted:* {', '.join(added_log)}."
+
+            # --- 2. LIST VAULT ---
             elif intent == "LIST":
-                # 1. Get the target store, default to 'All'
                 target_store = data.get('store', 'All')
-                
-                # 2. Start the query for this specific user/group
                 statement = select(Task).where(Task.group_id == recipient_id)
-                
-                # 3. Apply store filter if not "All"
                 if target_store.lower() != "all":
                     statement = statement.where(Task.store.ilike(target_store))
                 
                 tasks = session.exec(statement).all()
-                
                 if not tasks:
-                    response_msg = f"Your vault is empty for *{target_store}*." if target_store.lower() != "all" else "Your vault is empty."
+                    response_msg = f"Vault is empty for *{target_store}*."
                 else:
-                    # Grouping items by store for display
                     grouped = {}
                     for t in tasks:
-                        s_name = t.store.capitalize() if t.store else "General"
-                        if s_name not in grouped:
-                            grouped[s_name] = Counter()
+                        s_name = t.store.capitalize()
+                        if s_name not in grouped: grouped[s_name] = Counter()
                         grouped[s_name][t.description] += 1
                     
                     response_msg = f"📋 *Vault ({target_store}):*"
                     for s_name, counts in grouped.items():
-                        response_msg += f"\n\n📍 *{s_name}*"
-                        # Fixed display: - item (x2) or - item
-                        items_list = [f"- {name} (x{c})" if c > 1 else f"- {name}" for name, c in counts.items()]
-                        response_msg += "\n" + "\n".join(items_list)
+                        response_msg += f"\n\n📍 *{s_name}*\n" + "\n".join([f"- {k} (x{v})" if v>1 else f"- {k}" for k,v in counts.items()])
+
+            # --- 3. LIST REMINDERS ---
+            elif intent == "LIST_REMINDERS":
+                jobs = scheduler.get_jobs()
+                rem_list = []
+                for j in jobs:
+                    if j.id.startswith(f"rem_{recipient_id}"):
+                        time_str = j.next_run_time.strftime("%a %b %d, %I:%M %p")
+                        # Extract text from job args: f"⏰ *REMINDER:* {item}"
+                        msg = j.args[1].replace("⏰ *REMINDER:* ", "")
+                        rem_list.append(f"🔔 {msg} ({time_str})")
+                
+                response_msg = "🗓️ *Upcoming Reminders:*\n\n" + "\n".join(rem_list) if rem_list else "No active reminders."
+
+            # --- 4. DELETE / CLEAR ---
+            # --- UPDATED DELETE BLOCK ---
+            elif intent == "DELETE":
+                mode = data.get('mode', 'SINGLE')
+                # 🛡️ Defense: Handle both 'items' list and singular 'item'
+                items = data.get('items', [])
+                if not items and data.get('item'):
+                    items = [{'name': data.get('item'), 'count': data.get('count', 1), 'store': data.get('store')}]
+
+                # 🚀 SPECIAL CASE: If user tries to "delete" a reminder via DELETE intent
+                if items and any("meet" in i.get('name', '').lower() for i in items):
+                    intent = "DELETE_REMINDERS" # Re-route to scheduler logic
+                
+                if mode == "CLEAR_ALL":
+                    all_tasks = session.exec(select(Task).where(Task.group_id == recipient_id)).all()
+                    for t in all_tasks: session.delete(t)
+                    session.commit()
+                    response_msg = "🧹 Vault cleared."
+                elif intent == "DELETE": # Proceed if not re-routed
+                    removed = []
+                    for item in items:
+                        name = item.get('name', '').lower().strip()
+                        stmt = select(Task).where(Task.group_id == recipient_id, Task.description == name)
+                        # Filter by store if specified
+                        if item.get('store'): stmt = stmt.where(Task.store.ilike(item.get('store')))
+                        
+                        tasks = session.exec(stmt.limit(int(item.get('count', 1))) if mode == 'SINGLE' else stmt).all()
+                        for t in tasks: session.delete(t)
+                        if tasks: removed.append(f"{name} (x{len(tasks)})")
+                    session.commit()
+                    response_msg = f"🗑️ Removed: {', '.join(removed)}" if removed else "❓ Not found in vault."
+
+            # --- UPDATED DELETE_REMINDERS BLOCK ---
+            if intent == "DELETE_REMINDERS":
+                item_to_remove = data.get('item', '').lower()
+                jobs = scheduler.get_jobs()
+                removed_count = 0
+                for job in jobs:
+                    # Match by recipient AND search for the task name in the message
+                    if job.id.startswith(f"rem_{recipient_id}"):
+                        if not item_to_remove or item_to_remove in job.args[1].lower():
+                            scheduler.remove_job(job.id)
+                            removed_count += 1
+                response_msg = f"🗑️ Deleted {removed_count} reminders."
+            # --- 5. REMIND ---
+            elif intent == "REMIND":
+                item = data.get('item', 'Reminder')
+                ts, mins = data.get('timestamp'), data.get('minutes')
+                run_time = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S") if ts else datetime.now() + timedelta(minutes=int(mins or 5))
+                
+                scheduler.add_job(send_wa, 'date', run_date=run_time, args=[recipient_id, f"⏰ *REMINDER:* {item}"], 
+                                  id=f"rem_{recipient_id}_{run_time.timestamp()}")
+                response_msg = f"🗓️ Scheduled: '{item}' for {run_time.strftime('%a %I:%M %p')}."
 
             elif intent == "MOVE":
-                item_name = data.get('item', '').lower().strip()
-                from_store = data.get('from_store', 'General')
-                to_store = data.get('to_store', 'General')
+                item_name, f_s, t_s = data.get('item', '').lower(), data.get('from_store', 'General'), data.get('to_store', 'General')
+                task = session.exec(select(Task).where(Task.group_id==recipient_id, Task.description==item_name, Task.store.ilike(f_s))).first()
+                if task:
+                    task.store = t_s
+                    session.add(task); session.commit()
+                    response_msg = f"🚚 Moved *{item_name}* to {t_s}."
 
-                # 1. Find the item in the 'from' store
-                statement = select(Task).where(
-                    Task.group_id == recipient_id, 
-                    Task.description == item_name,
-                    Task.store.ilike(from_store)
-                )
-                task_to_move = session.exec(statement).first()
-
-                if task_to_move:
-                    # 2. Update the store and commit
-                    task_to_move.store = to_store
-                    session.add(task_to_move)
-                    session.commit()
-                    response_msg = f"🚚 Moved *{item_name}* from {from_store} to {to_store}."
-                else:
-                    response_msg = f"❓ Couldn't find {item_name} in {from_store}."
-
-            elif intent == "DELETE":
-                items = data.get('items', [])
-                # Some LLMs put 'mode' inside 'items', others at top of 'data'
-                mode = data.get('mode', items[0].get('mode', 'SINGLE') if items else 'SINGLE')
-                removed_log = []
-
-                for item in items:
-                    name = item.get('name', '').lower().strip()
-                    count = int(item.get('count', 1))
-
-                    if mode == "ALL":
-                        # Delete every instance of this item for this group
-                        statement = delete(Task).where(Task.group_id == recipient_id, Task.description == name)
-                        session.exec(statement)
-                        removed_log.append(f"all {name}s")
-                    else:
-                        # Delete specific number of items (limit to the count provided)
-                        # We fetch the IDs first to ensure we only delete the requested amount
-                        tasks = session.exec(
-                            select(Task)
-                            .where(Task.group_id == recipient_id, Task.description == name)
-                            .limit(count)
-                        ).all()
-                        
-                        for t in tasks:
-                            session.delete(t)
-                        
-                        if tasks:
-                            removed_log.append(f"{len(tasks)}x {name}")
-
-                session.commit()
-                if removed_log:
-                    response_msg = f"🗑️ *Removed:* {', '.join(removed_log)}."
-                else:
-                    response_msg = "❓ I couldn't find those items in your vault."
-            
-            elif intent == "REMIND":
-                txt, mins = data.get('item', 'Reminder'), int(data.get('minutes', 5))
-                scheduler.add_job(send_wa, 'date', run_date=datetime.now()+timedelta(minutes=mins), 
-                                  args=[recipient_id, f"⏰ *REMINDER:* {txt}"], id=f"rem_{os.urandom(4).hex()}")
-                response_msg = f"⏰ Set for {mins} mins."
-
-            elif intent == "CHAT": response_msg = data.get('answer', "How can I help?")
+            elif intent == "CHAT": response_msg = data.get('answer')
             elif intent == "ONBOARD": response_msg = get_guide()
-            else: response_msg = "🤔 Not sure what you mean. Try 'Add milk' or 'Help'."
 
-        if response_msg:
-            send_wa(recipient_id, response_msg)
+        if response_msg: send_wa(recipient_id, response_msg)
     except Exception as e:
         logger.error(f"❌ Process Error: {e}", exc_info=True)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
-    scheduler.start()
+    init_db(); scheduler.start()
     yield
     scheduler.shutdown()
 
@@ -192,17 +191,12 @@ async def webhook(request: Request, bg: BackgroundTasks):
     data = await request.json()
     payload = data.get('payload', {})
     msg_id = payload.get('id')
-
-    # 🛡️ FIX: Ignore if we already processed this exact message ID
-    if msg_id in processed_ids:
-        return {"status": "duplicate_ignored"}
-
+    if msg_id in processed_ids: return {"status": "duplicate_ignored"}
+    
     if not payload.get('fromMe') and payload.get('body'):
         processed_ids.add(msg_id)
-        # Keep the tracker from growing forever
-        if len(processed_ids) > 500:
-            processed_ids.clear() 
-            
-        bg.add_task(process_adjnt, payload.get('body'), payload.get('from'))
+        # Keep consistent ID normalization
+        clean_id = str(payload.get('from', '')).strip()
+        bg.add_task(process_adjnt, payload.get('body'), clean_id)
     
     return {"status": "ok"}

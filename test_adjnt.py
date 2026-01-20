@@ -109,3 +109,43 @@ async def test_edge_cases():
         assert total_juice == 2, f"Expected 2 juices total, found {total_juice}. (Check if Move triggered a Task/Add instead)"
         assert kitchen_juice >= 1, "Move failed: No juice found in Kitchen store."
         print("✅ Edge Cases Passed: Auto-located and Moved successfully.")
+@pytest.mark.asyncio
+async def test_deletion_variants():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        uid = "del_user@c.us"
+
+        # Setup
+        await ac.post("/webhook", json={"payload": {"id": "d1", "from": uid, "body": "add 3 apples to General", "fromMe": False}})
+        await ac.post("/webhook", json={"payload": {"id": "d2", "from": uid, "body": "add 1 apple to Safeway", "fromMe": False}})
+        await asyncio.sleep(2)
+
+        # 1. Test "Remove apple" (Should remove 1 from anywhere)
+        await ac.post("/webhook", json={"payload": {"id": "d3", "from": uid, "body": "remove apple", "fromMe": False}})
+        
+        # 2. Test "Remove all apple" (Should remove all remaining apples)
+        await ac.post("/webhook", json={"payload": {"id": "d4", "from": uid, "body": "remove all apples", "fromMe": False}})
+        
+        # 3. Test "Clear list"
+        await ac.post("/webhook", json={"payload": {"id": "d5", "from": uid, "body": "clear list", "fromMe": False}})
+        await asyncio.sleep(2)
+
+        with Session(engine) as s:
+            final_count = s.exec(select(func.count(Task.id)).where(Task.group_id == uid)).one()
+            assert final_count == 0
+            print("✅ Deletion variants passed.")
+@pytest.mark.asyncio
+async def test_date_reminders():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        uid = "test@c.us"
+        # Test specific date
+        await ac.post("/webhook", json={"payload": {"id": "r1", "body": "neha Lunch Jan 24th 2026 10:30 AM", "from": uid}})
+        await asyncio.sleep(2)
+        
+        jobs = scheduler.get_jobs()
+        assert any("neha Lunch" in str(j.args) for j in jobs)
+        
+        # Test Clear Reminders
+        await ac.post("/webhook", json={"payload": {"id": "r2", "body": "delete all my reminders", "from": uid}})
+        await asyncio.sleep(1)
+        assert len(scheduler.get_jobs()) == 0
