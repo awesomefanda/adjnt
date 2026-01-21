@@ -21,6 +21,7 @@ services:
     build: .
     # 🚀 Changed to match the service name for clarity
     container_name: adjnt
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
